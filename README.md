@@ -78,3 +78,7 @@ With the virtual environment active, start the game with:
 ```powershell
 python main.py
 ```
+
+Made by 
+Noah Weckx
+Tiebe Noels
