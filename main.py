@@ -40,6 +40,11 @@ TOWER_MAX_LEAN_DEGREES = 78.0
 OBSTACLE_SIZE_MULTIPLIER = 1.7
 TRAP_ARM_PROBABILITY = 0.66
 TRAP_SPAWN_COOLDOWN = 0.85
+PROGRESSION_HAZARD_FIRST_OFFSET = 260
+PROGRESSION_HAZARD_INTERVAL_MIN = 300
+PROGRESSION_HAZARD_INTERVAL_MAX = 390
+SPIKE_HIT_KNOCKBACK = 210
+SPIKE_HIT_RECOVERY = 0.7
 SECRET_KEY_SEQUENCE = (pygame.K_d, pygame.K_d, pygame.K_a, pygame.K_s)
 
 # Fake lag is a deliberate visual pause, never a dropped-frame performance problem.
@@ -194,7 +199,6 @@ class Player:
         self.coyote_time = 0.0
         self.facing = 1
         self.animation_time = 0.0
-        self.drop_timer = 0.0
 
     def jump(self):
         if self.grounded or self.coyote_time > 0:
@@ -211,17 +215,14 @@ class Player:
         previous_grounded = self.grounded
         incoming_fall_speed = max(0.0, self.velocity_y)
         self.grounded = False
-        self.drop_timer = max(0.0, self.drop_timer - dt)
         self.animation_time += dt
 
-        horizontal = int(keys[pygame.K_d]) - int(keys[pygame.K_a])
+        horizontal = int(keys[pygame.K_RIGHT]) - int(keys[pygame.K_LEFT])
         self.velocity_x = horizontal * 265
         if horizontal:
             self.facing = horizontal
 
-        # S is both a drop-through command and a faster-fall modifier.
-        gravity = 1550 if not keys[pygame.K_s] else 2200
-        self.velocity_y = min(self.velocity_y + gravity * dt, 900)
+        self.velocity_y = min(self.velocity_y + 1550 * dt, 900)
 
         self.rect.x += round(self.velocity_x * dt)
         self.rect.x = clamp(self.rect.x, 0, WORLD_WIDTH - self.rect.width)
@@ -231,7 +232,7 @@ class Player:
 
         # One-way collision only considers downward top crossings. There is deliberately
         # no underside/ceiling collision, so rising players pass straight through ledges.
-        if self.velocity_y >= 0 and self.drop_timer <= 0:
+        if self.velocity_y >= 0:
             for platform in platforms:
                 if not platform.alive or platform.break_timer is not None:
                     continue
@@ -538,6 +539,8 @@ class Game:
         self.secret_effect.active = False
         self.pending_trap = None
         self.trap_spawn_cooldown = 0.0
+        self.next_progression_hazard_x = SAFE_ZONE_END + PROGRESSION_HAZARD_FIRST_OFFSET
+        self.trap_hit_cooldown = 0.0
         self.input_count = 0
         self.fake_lag_timer = 0.0
         self.fake_lag_cooldown = random.uniform(FAKE_LAG_INTERVAL_MIN,
@@ -679,16 +682,13 @@ class Game:
                 self.reset()
             return
 
-        if event.key in (pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s):
-            if event.key not in self.held_keys:
+        if event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_SPACE):
+            is_new_press = event.key not in self.held_keys
+            if is_new_press:
                 self.held_keys.add(event.key)
                 self._arm_trap_from_input()
-            if event.key == pygame.K_w:
+            if event.key == pygame.K_SPACE and is_new_press:
                 self.player.jump()
-            elif event.key == pygame.K_s:
-                # Pressing down briefly disables ledge collision for a drop-through.
-                self.player.drop_timer = 0.20
-                self.player.rect.y += 3
 
     def _process_pending_trap(self):
         # Enforce the spawn buffer even if the player walks back into it with a pending trap.
@@ -726,6 +726,19 @@ class Game:
                                                      self.player.rect.centerx))
                 self._set_message("ROLLING SPIKE! Jump or evade!", 1.7)
             self.pending_trap = None
+
+    def _process_progression_hazard(self):
+        """Spawn hazards from world progress too, so holding a direction is not a bypass."""
+        if self.player.rect.centerx < SAFE_ZONE_END:
+            return
+        if self.player.rect.centerx < self.next_progression_hazard_x:
+            return
+
+        spawn_x = min(self.player.rect.centerx + 220, WORLD_WIDTH - 45)
+        self.traps.append(HomingRollingSpike(spawn_x, self.player.rect.centerx))
+        self.next_progression_hazard_x += random.randint(
+            PROGRESSION_HAZARD_INTERVAL_MIN, PROGRESSION_HAZARD_INTERVAL_MAX)
+        self._set_message("A rolling spike is closing in. Jump over it!", 1.5)
 
     def _begin_glitch_ending(self):
         """Freeze gameplay and start the deliberately alarming door fake-out."""
@@ -884,6 +897,7 @@ class Game:
 
         self.world_time += dt
         self.trap_spawn_cooldown = max(0.0, self.trap_spawn_cooldown - dt)
+        self.trap_hit_cooldown = max(0.0, self.trap_hit_cooldown - dt)
         self.invulnerable_timer = max(0.0, self.invulnerable_timer - dt)
         self.message_timer = max(0.0, self.message_timer - dt)
 
@@ -892,6 +906,7 @@ class Game:
 
         self._process_pending_trap()
         self.player.update(dt, pygame.key.get_pressed(), self.platforms)
+        self._process_progression_hazard()
         if self.player.rect.centerx < SAFE_ZONE_END:
             self.pending_trap = None
             self.traps.clear()
@@ -908,8 +923,16 @@ class Game:
                 hazard.update(dt)
             hazard_rect = hazard.rect() if callable(getattr(hazard, "rect", None)) else hazard.rect
             if hazard.alive and self.player.rect.colliderect(hazard_rect):
-                # A collision consumes the visual hazard without the old random damage event.
                 hazard.alive = False
+                if self.trap_hit_cooldown <= 0:
+                    # Give contact a readable penalty without restoring the removed health loss.
+                    self.player.rect.x = max(
+                        0, self.player.rect.x - SPIKE_HIT_KNOCKBACK)
+                    self.player.velocity_x = 0
+                    self.player.velocity_y = -220
+                    self.player.grounded = False
+                    self.trap_hit_cooldown = SPIKE_HIT_RECOVERY
+                    self._set_message("Knocked back! Time your jump.", 1.4)
         self.traps = [hazard for hazard in self.traps if hazard.alive]
 
         if self.player.rect.top > SCREEN_HEIGHT + 60:
@@ -984,7 +1007,7 @@ class Game:
         pygame.draw.rect(self.screen, (29, 35, 40), (SCREEN_WIDTH - 222, 19, 202, 10))
         pygame.draw.rect(self.screen, (126, 220, 170),
                          (SCREEN_WIDTH - 220, 21, round(198 * progress), 6))
-        controls = self.font.render("A/D move   W jump   S drop", True, (215, 222, 216))
+        controls = self.font.render("Left/Right move   Space jump", True, (215, 222, 216))
         self.screen.blit(controls, (18, SCREEN_HEIGHT - 31))
 
         if self.message_timer > 0 and self.trap_message:

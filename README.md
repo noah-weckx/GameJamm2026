@@ -60,14 +60,13 @@ On macOS/Linux, use `python3 -m venv .venv` and `source .venv/bin/activate` in p
 ## Controls
 
 - `Space`: start from the title screen
-- `A` / `D`: move left / right
-- `W`: jump
-- `S`: drop through a ledge or fall faster
-- Type `GLITCH` on the title screen or during play to briefly trigger the secret effect
+- `Left` / `Right`: move
+- `Space`: jump during gameplay; release and press again for each jump
+- Press `D`, `D`, `A`, `S` in sequence to trigger the secret glitch and exit
 - `R`: restart after winning or running out of health
 - `Esc`: quit
 
-Reach the plain doorway at the far right of the four-screen level. The first 500 world pixels are a safe spawn zone; hazards only arm after you leave it. You have three health points. Hazards knock you back to your latest checkpoint, and the scenery shifts toward a damaged red palette as health is lost. The movement-triggered hazards include crumbling platforms, falling anvils, spinning projectiles, and a homing rolling spike.
+Reach the plain doorway at the far right of the four-screen level. The first 500 world pixels are a safe spawn zone; hazards only arm after you leave it. You have three health points. Falling into gaps knocks you back to your latest checkpoint, while hazard contact knocks you backward without removing health. Progress-triggered rolling spikes spawn even if no new keys are pressed; input-triggered hazards also include crumbling platforms, falling anvils, and spinning projectiles.
 
 Crumbling platforms return after 1.5 seconds. Incoming projectiles have larger hitboxes and can be armed more frequently. Random fake-lag flashes replay or tear the previous frame for 0.2-0.5 seconds while pausing gameplay physics, so the visual effect cannot cause an unseen fall. The parallax Leaning Tower rotates clockwise as level progress increases; adjust `TOWER_FALL_SPEED` and `TOWER_MAX_LEAN_DEGREES` near the top of `main.py` to tune it.
 
