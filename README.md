@@ -79,6 +79,9 @@ With the virtual environment active, start the game with:
 python main.py
 ```
 
-Made by 
-Noah Weckx
-Tiebe Noels
+Made by <br>
+Noah Weckx <br>
+Tiebe Noels <br>
+Diego Gutiérrez Suarez <br>
+Nadia Jaman Easha <br>
+Ifeanyi Cyril Okeke <br>

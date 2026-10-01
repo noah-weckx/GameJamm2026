@@ -40,6 +40,7 @@ TOWER_MAX_LEAN_DEGREES = 78.0
 OBSTACLE_SIZE_MULTIPLIER = 1.7
 TRAP_ARM_PROBABILITY = 0.66
 TRAP_SPAWN_COOLDOWN = 0.85
+SECRET_KEY_SEQUENCE = (pygame.K_d, pygame.K_d, pygame.K_a, pygame.K_s)
 
 # Fake lag is a deliberate visual pause, never a dropped-frame performance problem.
 FAKE_LAG_INTERVAL_MIN = 5.0
@@ -52,6 +53,7 @@ ASSET_ROOT = PROJECT_ROOT / "assets"
 IMAGE_ASSETS = ASSET_ROOT / "images"
 UI_IMAGE_ASSETS = IMAGE_ASSETS / "ui"
 AUDIO_ASSETS = ASSET_ROOT / "audio"
+BACKGROUND_MUSIC_PATH = AUDIO_ASSETS / "soundtracklv1(ver2).mp3"
 
 WHITE = (245, 240, 220)
 INK = (19, 24, 32)
@@ -77,6 +79,16 @@ def load_optional_sound(path):
         return pygame.mixer.Sound(str(path))
     except (pygame.error, OSError):
         return None
+
+
+def start_background_music():
+    """Load and loop the optional level soundtrack for the lifetime of the game."""
+    try:
+        pygame.mixer.music.load(str(BACKGROUND_MUSIC_PATH))
+        pygame.mixer.music.play(-1)
+    except (pygame.error, OSError) as error:
+        # A missing track or unavailable decoder/audio device must not block startup.
+        print(f"Background music unavailable: {error}")
 
 
 class AudioManager:
@@ -495,6 +507,7 @@ class Game:
                 pygame.mixer.init()
         except pygame.error:
             pass
+        start_background_music()
         pygame.display.set_caption("Doorway Dash")
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         self.audio = AudioManager()
@@ -520,7 +533,7 @@ class Game:
         self.ending_timer = 0.0
         self.world_time = 0.0
         self.crumble_pixels = []
-        self.secret_buffer = ""
+        self.secret_buffer = []
         self.secret_return_state = "playing"
         self.secret_effect.active = False
         self.pending_trap = None
@@ -617,18 +630,20 @@ class Game:
         self.message_timer = duration
 
     def _listen_for_secret(self, event):
-        """Recognize GLITCH in the menu or normal play without blocking movement keys."""
+        """Recognize the exact D, D, A, S key sequence in menu or normal play."""
         if self.game_state not in ("start", "playing"):
             return False
-        letter = event.unicode.lower()
-        if len(letter) != 1 or not letter.isalpha():
+
+        if event.key not in SECRET_KEY_SEQUENCE:
+            self.secret_buffer.clear()
             return False
 
-        self.secret_buffer = (self.secret_buffer + letter)[-len("glitch"):]
-        if self.secret_buffer == "glitch":
+        self.secret_buffer.append(event.key)
+        self.secret_buffer = self.secret_buffer[-len(SECRET_KEY_SEQUENCE):]
+        if tuple(self.secret_buffer) == SECRET_KEY_SEQUENCE:
             self.secret_return_state = self.game_state
             self.game_state = "secret_glitch"
-            self.secret_buffer = ""
+            self.secret_buffer.clear()
             self.secret_effect.start()
             return True
         return False
@@ -850,7 +865,9 @@ class Game:
         if self.game_state == "secret_glitch":
             self.world_time += dt
             if not self.secret_effect.update(dt):
-                self.game_state = self.secret_return_state
+                # The secret sequence is an intentional terminal state, not a temporary overlay.
+                self.audio.stop_all()
+                self.running = False
             return
 
         if self.game_state.startswith("glitch_"):
@@ -891,8 +908,8 @@ class Game:
                 hazard.update(dt)
             hazard_rect = hazard.rect() if callable(getattr(hazard, "rect", None)) else hazard.rect
             if hazard.alive and self.player.rect.colliderect(hazard_rect):
+                # A collision consumes the visual hazard without the old random damage event.
                 hazard.alive = False
-                self._damage_player("A hazard got you. Back to the checkpoint.")
         self.traps = [hazard for hazard in self.traps if hazard.alive]
 
         if self.player.rect.top > SCREEN_HEIGHT + 60:
@@ -1098,8 +1115,14 @@ class Game:
             for event in pygame.event.get():
                 self.handle_event(event)
             self.update(dt)
-            self.draw()
+            if self.running:
+                self.draw()
 
+        self.audio.stop_all()
+        try:
+            pygame.mixer.music.stop()
+        except pygame.error:
+            pass
         pygame.quit()
         sys.exit(0)
 
